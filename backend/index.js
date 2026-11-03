@@ -6,7 +6,7 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const mongoose = require("mongoose");
 const { Server } = require("socket.io");
-require("dotenv").config();
+require('dotenv').config
 
 const dbconnect = require("./config/db");
 const Users = require("./models/usermodels");
