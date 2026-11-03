@@ -8,12 +8,12 @@ import "./App.css";
 import GetCurrentUser from "./hooks/GetCurrentUser";
 import GetSuggestedUsers from "./hooks/Getsugesteduser";
 
-// Development and production API URL
+
 export const ServerUrl = import.meta.env.DEV
   ? "http://localhost:5000"
   : window.location.origin;
 
-// Lazy loaded components
+
 const Signup = lazy(() => import("./components/Signup"));
 const Signin = lazy(() => import("./components/Signin"));
 const Home = lazy(() => import("./components/Home"));
@@ -35,7 +35,7 @@ const Post = lazy(() => import("./components/Post"));
 const Reel = lazy(() => import("./components/Reel"));
 const Search = lazy(() => import("./components/Search"));
 
-// Loading component
+
 const PageLoader = () => {
   return (
     <div className="w-full h-screen flex justify-center items-center">
@@ -45,27 +45,27 @@ const PageLoader = () => {
 };
 
 function App() {
-  // Fetch current logged-in user
+  
   GetCurrentUser();
 
   const { userdata, loading, authChecked } = useSelector(
     (state) => state.user
   );
 
-  // Authentication loading
+  
   if (loading && !authChecked) {
     return <PageLoader />;
   }
 
   return (
     <>
-      {/* Fetch suggested users only when logged in */}
+    
       {userdata && <GetSuggestedUsers />}
 
-      {/* Lazy loading fallback */}
+   
       <Suspense fallback={<PageLoader />}>
         <Routes>
-          {/* Home */}
+       
           <Route
             path="/"
             element={
@@ -73,7 +73,7 @@ function App() {
             }
           />
 
-          {/* Authentication */}
+        
           <Route
             path="/signup"
             element={
@@ -99,35 +99,35 @@ function App() {
             }
           />
 
-          {/* AI */}
+          
           <Route path="/ai" element={<Aiimg />} />
 
-          {/* Posts and uploads */}
+      
           <Route path="/upload" element={<Upload />} />
           <Route path="/post/:id" element={<Post />} />
 
-          {/* Profile */}
+          
           <Route path="/profile/:username" element={<Profile />} />
           <Route path="/editprofile" element={<Editprofile />} />
 
-          {/* Reels */}
+        
           <Route path="/reels" element={<Reels />} />
           <Route path="/reel/:id" element={<Reel />} />
 
-          {/* Stories */}
+         
           <Route path="/create-story" element={<CreateStory />} />
           <Route path="/stories" element={<Stories />} />
 
-          {/* Messages */}
+        
           <Route path="/messages" element={<Message />} />
 
-          {/* Saved posts */}
+        
           <Route path="/saved" element={<Saved />} />
 
-          {/* Search */}
+         
           <Route path="/search" element={<Search />} />
 
-          {/* Unknown routes */}
+         
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

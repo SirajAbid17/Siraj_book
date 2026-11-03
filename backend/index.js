@@ -17,10 +17,6 @@ const reelsrouter = require("./routes/reelsroutes");
 const storyrouter = require("./routes/storyroutes");
 const messageRouter = require("./routes/messageRoutes");
 
-// --------------------------------------------------
-// APP CONFIGURATION
-// --------------------------------------------------
-
 const app = express();
 const server = http.createServer(app);
 
@@ -30,11 +26,6 @@ const publicPath = path.join(__dirname, "public");
 const indexPath = path.join(publicPath, "index.html");
 
 const isProduction = process.env.NODE_ENV === "production";
-
-// --------------------------------------------------
-// CORS CONFIGURATION
-// ALLOW ALL ORIGINS
-// --------------------------------------------------
 
 const corsOptions = {
   origin: (origin, callback) => {
@@ -62,9 +53,6 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 
-// --------------------------------------------------
-// BODY PARSER
-// --------------------------------------------------
 
 app.use(express.json({ limit: "10mb" }));
 
@@ -77,17 +65,7 @@ app.use(
 
 app.use(cookieParser());
 
-// --------------------------------------------------
-// STATIC FRONTEND
-// backend/public/index.html
-// backend/public/assets/...
-// --------------------------------------------------
-
 app.use(express.static(publicPath));
-
-// --------------------------------------------------
-// DATABASE CONNECTION
-// --------------------------------------------------
 
 let databaseConnection = null;
 
@@ -105,10 +83,6 @@ const connectDatabase = async () => {
 
   await databaseConnection;
 };
-
-// --------------------------------------------------
-// HEALTH CHECK
-// --------------------------------------------------
 
 app.get("/health", async (req, res) => {
   try {
@@ -131,9 +105,6 @@ app.get("/health", async (req, res) => {
   }
 });
 
-// --------------------------------------------------
-// DATABASE MIDDLEWARE FOR API
-// --------------------------------------------------
 
 app.use("/api", async (req, res, next) => {
   try {
@@ -149,10 +120,6 @@ app.use("/api", async (req, res, next) => {
   }
 });
 
-// --------------------------------------------------
-// API ROUTES
-// --------------------------------------------------
-
 app.use("/api", authroute);
 app.use("/api", userrouter);
 app.use("/api", postroute);
@@ -160,10 +127,6 @@ app.use("/api", reelsrouter);
 app.use("/api", storyrouter);
 app.use("/api", messageRouter);
 
-// --------------------------------------------------
-// SOCKET.IO
-// LOCAL DEVELOPMENT ONLY
-// --------------------------------------------------
 
 if (!process.env.VERCEL) {
   const { Server } = require("socket.io");
@@ -181,7 +144,7 @@ if (!process.env.VERCEL) {
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
 
-    // USER ONLINE
+   
     socket.on("user_online", async (userId) => {
       try {
         if (
@@ -219,21 +182,21 @@ if (!process.env.VERCEL) {
       }
     });
 
-    // JOIN CONVERSATION
+  
     socket.on("join_conversation", (conversationId) => {
       if (conversationId) {
         socket.join(conversationId);
       }
     });
 
-    // LEAVE CONVERSATION
+    
     socket.on("leave_conversation", (conversationId) => {
       if (conversationId) {
         socket.leave(conversationId);
       }
     });
 
-    // SEND MESSAGE
+    
     socket.on("send_message", (data) => {
       try {
         const {
@@ -280,7 +243,7 @@ if (!process.env.VERCEL) {
       }
     });
 
-    // TYPING START
+    
     socket.on("typing_start", (data) => {
       if (data?.conversationId) {
         socket.to(data.conversationId).emit("user_typing", {
@@ -291,7 +254,7 @@ if (!process.env.VERCEL) {
       }
     });
 
-    // TYPING STOP
+  
     socket.on("typing_stop", (data) => {
       if (data?.conversationId) {
         socket.to(data.conversationId).emit("user_typing", {
@@ -302,7 +265,7 @@ if (!process.env.VERCEL) {
       }
     });
 
-    // MESSAGE READ
+  
     socket.on("message_read", (data) => {
       if (data?.conversationId && data?.messageId) {
         socket.to(data.conversationId).emit(
@@ -316,7 +279,7 @@ if (!process.env.VERCEL) {
       }
     });
 
-    // DISCONNECT
+    
     socket.on("disconnect", async () => {
       if (!socket.userId) return;
 
@@ -357,10 +320,6 @@ if (!process.env.VERCEL) {
   });
 }
 
-// --------------------------------------------------
-// REACT SPA FALLBACK
-// --------------------------------------------------
-
 app.get(/.*/, (req, res, next) => {
   if (
     req.path.startsWith("/api/") ||
@@ -379,9 +338,6 @@ app.get(/.*/, (req, res, next) => {
   });
 });
 
-// --------------------------------------------------
-// API 404
-// --------------------------------------------------
 
 app.use("/api", (req, res) => {
   return res.status(404).json({
@@ -390,9 +346,6 @@ app.use("/api", (req, res) => {
   });
 });
 
-// --------------------------------------------------
-// GENERAL 404
-// --------------------------------------------------
 
 app.use((req, res) => {
   return res.status(404).json({
@@ -401,9 +354,6 @@ app.use((req, res) => {
   });
 });
 
-// --------------------------------------------------
-// ERROR HANDLER
-// --------------------------------------------------
 
 app.use((error, req, res, next) => {
   console.error("Server error:", error);
@@ -420,9 +370,6 @@ app.use((error, req, res, next) => {
   });
 });
 
-// --------------------------------------------------
-// LOCAL SERVER
-// --------------------------------------------------
 
 if (!process.env.VERCEL) {
   server.listen(PORT, () => {
@@ -430,9 +377,6 @@ if (!process.env.VERCEL) {
   });
 }
 
-// --------------------------------------------------
-// GRACEFUL SHUTDOWN
-// --------------------------------------------------
 
 if (!process.env.VERCEL) {
   process.on("SIGINT", async () => {
@@ -454,8 +398,5 @@ if (!process.env.VERCEL) {
   });
 }
 
-// --------------------------------------------------
-// EXPORT APP FOR VERCEL
-// --------------------------------------------------
 
 module.exports = app;
