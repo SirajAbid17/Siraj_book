@@ -1,29 +1,57 @@
 
-require("dotenv").config();
-
 const express = require("express");
 const http = require("http");
 const path = require("path");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const mongoose = require("mongoose");
-const { Server } = require("socket.io");
+
+require("dotenv").config();
 
 const dbconnect = require("./config/db");
+
+const authroute = require("./routes/authroutes");
+const userrouter = require("./routes/userroutes");
+const postroute = require("./routes/postroutes");
+const reelsrouter = require("./routes/reelsroutes");
+const storyrouter = require("./routes/storyroutes");
+const messageRouter = require("./routes/messageRoutes");
+
+// --------------------------------------------------
+// APP CONFIGURATION
+// --------------------------------------------------
 
 const app = express();
 const server = http.createServer(app);
 
-// ===============================
-// CORS - Allow All Origins
-// ===============================
+const PORT = process.env.PORT || 5000;
+
+const publicPath = path.join(__dirname, "public");
+const indexPath = path.join(publicPath, "index.html");
+
+const isProduction = process.env.NODE_ENV === "production";
+
+// --------------------------------------------------
+// CORS CONFIGURATION
+// ALLOW ALL ORIGINS
+// --------------------------------------------------
 
 const corsOptions = {
   origin: (origin, callback) => {
     callback(null, origin || true);
   },
+
   credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+
+  methods: [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+  ],
+
   allowedHeaders: [
     "Content-Type",
     "Authorization",
@@ -34,181 +62,313 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 
-// ===============================
-// MIDDLEWARE
-// ===============================
+// --------------------------------------------------
+// BODY PARSER
+// --------------------------------------------------
 
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+app.use(express.json({ limit: "10mb" }));
+
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: "10mb",
+  })
+);
+
 app.use(cookieParser());
 
-// ===============================
-// FRONTEND BUILD
-// ===============================
-
-const publicPath = path.join(__dirname, "public");
-const indexPath = path.join(publicPath, "index.html");
+// --------------------------------------------------
+// STATIC FRONTEND
+// backend/public/index.html
+// backend/public/assets/...
+// --------------------------------------------------
 
 app.use(express.static(publicPath));
 
-// ===============================
+// --------------------------------------------------
 // DATABASE CONNECTION
-// ===============================
+// --------------------------------------------------
 
-let dbPromise = null;
+let databaseConnection = null;
 
-const connectDB = async (req, res, next) => {
-  try {
-    if (mongoose.connection.readyState === 1) {
-      return next();
-    }
+const connectDatabase = async () => {
+  if (mongoose.connection.readyState === 1) {
+    return;
+  }
 
-    if (!dbPromise) {
-      dbPromise = dbconnect().catch((error) => {
-        dbPromise = null;
-        throw error;
-      });
-    }
-
-    await dbPromise;
-    next();
-  } catch (error) {
-    console.error("Database error:", error.message);
-
-    res.status(500).json({
-      success: false,
-      message: "Database connection failed",
-      error:
-        process.env.NODE_ENV === "production"
-          ? undefined
-          : error.message,
+  if (!databaseConnection) {
+    databaseConnection = dbconnect().catch((error) => {
+      databaseConnection = null;
+      throw error;
     });
   }
+
+  await databaseConnection;
 };
 
-// ===============================
+// --------------------------------------------------
 // HEALTH CHECK
-// ===============================
+// --------------------------------------------------
 
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "SirajBook backend is running",
-  });
+app.get("/health", async (req, res) => {
+  try {
+    await connectDatabase();
+
+    return res.status(200).json({
+      success: true,
+      message: "SirajBook server is running",
+      database: "connected",
+      environment: process.env.NODE_ENV || "development",
+    });
+  } catch (error) {
+    console.error("Health check database error:", error.message);
+
+    return res.status(503).json({
+      success: false,
+      message: "Database connection unavailable",
+      database: "disconnected",
+    });
+  }
 });
 
-// ===============================
-// API DATABASE MIDDLEWARE
-// ===============================
+// --------------------------------------------------
+// DATABASE MIDDLEWARE FOR API
+// --------------------------------------------------
 
-app.use("/api", connectDB);
+app.use("/api", async (req, res, next) => {
+  try {
+    await connectDatabase();
+    next();
+  } catch (error) {
+    console.error("MongoDB connection error:", error.message);
 
-// ===============================
-// ROUTES
-// ===============================
+    return res.status(503).json({
+      success: false,
+      message: "Database connection unavailable",
+    });
+  }
+});
 
-// Keep your existing route paths and filenames.
-// Change these paths only if your project uses different names.
+// --------------------------------------------------
+// API ROUTES
+// --------------------------------------------------
 
-app.use("/api/auth", require("./routes/authRoutes"));
-app.use("/api/user", require("./routes/userRoutes"));
-app.use("/api/message", require("./routes/messageRoutes"));
-app.use("/api/conversation", require("./routes/conversationRoutes"));
+app.use("/api", authroute);
+app.use("/api", userrouter);
+app.use("/api", postroute);
+app.use("/api", reelsrouter);
+app.use("/api", storyrouter);
+app.use("/api", messageRouter);
 
-// ===============================
+// --------------------------------------------------
 // SOCKET.IO
-// ===============================
-
-// Vercel serverless does not support persistent Socket.IO
-// connections reliably. Run Socket.IO on a separate
-// persistent server for production realtime messaging.
-
-let io = null;
-const onlineUsers = new Map();
+// LOCAL DEVELOPMENT ONLY
+// --------------------------------------------------
 
 if (!process.env.VERCEL) {
-  io = new Server(server, {
-    cors: {
-      origin: (origin, callback) => {
-        callback(null, origin || true);
-      },
-      credentials: true,
-      methods: ["GET", "POST"],
-    },
+  const { Server } = require("socket.io");
+
+  const io = new Server(server, {
+    cors: corsOptions,
+    transports: ["websocket", "polling"],
   });
 
-  app.set("io", io);
+  const onlineUsers = new Map();
+
+  app.set("socketio", io);
+  app.set("onlineUsers", onlineUsers);
 
   io.on("connection", (socket) => {
-    console.log("Socket connected:", socket.id);
+    console.log("User connected:", socket.id);
 
-    socket.on("addUser", (userId) => {
-      if (!userId) return;
-
-      onlineUsers.set(String(userId), socket.id);
-
-      io.emit("getOnlineUsers", Array.from(onlineUsers.keys()));
-    });
-
-    socket.on("sendMessage", (message) => {
-      if (!message) return;
-
-      const receiverId = String(
-        message.receiverId || message.recipientId || ""
-      );
-
-      const receiverSocket = onlineUsers.get(receiverId);
-
-      if (receiverSocket) {
-        io.to(receiverSocket).emit("getMessage", message);
-      }
-    });
-
-    socket.on("typing", ({ receiverId, senderId }) => {
-      const receiverSocket = onlineUsers.get(String(receiverId));
-
-      if (receiverSocket) {
-        io.to(receiverSocket).emit("typing", { senderId });
-      }
-    });
-
-    socket.on("stopTyping", ({ receiverId, senderId }) => {
-      const receiverSocket = onlineUsers.get(String(receiverId));
-
-      if (receiverSocket) {
-        io.to(receiverSocket).emit("stopTyping", { senderId });
-      }
-    });
-
-    socket.on("disconnect", () => {
-      for (const [userId, socketId] of onlineUsers.entries()) {
-        if (socketId === socket.id) {
-          onlineUsers.delete(userId);
+    // USER ONLINE
+    socket.on("user_online", async (userId) => {
+      try {
+        if (
+          !userId ||
+          !mongoose.Types.ObjectId.isValid(userId)
+        ) {
+          return;
         }
+
+        await connectDatabase();
+
+        onlineUsers.set(userId, socket.id);
+        socket.userId = userId;
+
+        await require("./models/usermodels").findByIdAndUpdate(
+          userId,
+          {
+            isOnline: true,
+            lastSeen: new Date(),
+          }
+        );
+
+        socket.broadcast.emit("user_status_changed", {
+          userId,
+          isOnline: true,
+          lastSeen: new Date(),
+        });
+
+        socket.emit(
+          "online_users_list",
+          Array.from(onlineUsers.keys())
+        );
+      } catch (error) {
+        console.error("User online error:", error);
+      }
+    });
+
+    // JOIN CONVERSATION
+    socket.on("join_conversation", (conversationId) => {
+      if (conversationId) {
+        socket.join(conversationId);
+      }
+    });
+
+    // LEAVE CONVERSATION
+    socket.on("leave_conversation", (conversationId) => {
+      if (conversationId) {
+        socket.leave(conversationId);
+      }
+    });
+
+    // SEND MESSAGE
+    socket.on("send_message", (data) => {
+      try {
+        const {
+          conversationId,
+          message,
+          senderId,
+          receiverId,
+        } = data || {};
+
+        if (!conversationId || !message) {
+          socket.emit("message_error", {
+            error: "Missing conversation ID or message",
+          });
+
+          return;
+        }
+
+        io.to(conversationId).emit(
+          "receive_message",
+          message
+        );
+
+        const receiverSocketId = onlineUsers.get(receiverId);
+
+        if (
+          receiverSocketId &&
+          receiverSocketId !== socket.id
+        ) {
+          io.to(receiverSocketId).emit(
+            "new_message_notification",
+            {
+              message,
+              conversationId,
+              senderId,
+            }
+          );
+        }
+      } catch (error) {
+        console.error("Socket message error:", error);
+
+        socket.emit("message_error", {
+          error: "Failed to send message",
+        });
+      }
+    });
+
+    // TYPING START
+    socket.on("typing_start", (data) => {
+      if (data?.conversationId) {
+        socket.to(data.conversationId).emit("user_typing", {
+          userId: data.userId,
+          isTyping: true,
+          conversationId: data.conversationId,
+        });
+      }
+    });
+
+    // TYPING STOP
+    socket.on("typing_stop", (data) => {
+      if (data?.conversationId) {
+        socket.to(data.conversationId).emit("user_typing", {
+          userId: data.userId,
+          isTyping: false,
+          conversationId: data.conversationId,
+        });
+      }
+    });
+
+    // MESSAGE READ
+    socket.on("message_read", (data) => {
+      if (data?.conversationId && data?.messageId) {
+        socket.to(data.conversationId).emit(
+          "message_read_confirmation",
+          {
+            messageId: data.messageId,
+            readBy: data.userId,
+            readAt: new Date(),
+          }
+        );
+      }
+    });
+
+    // DISCONNECT
+    socket.on("disconnect", async () => {
+      if (!socket.userId) return;
+
+      if (onlineUsers.get(socket.userId) !== socket.id) {
+        return;
       }
 
-      io.emit("getOnlineUsers", Array.from(onlineUsers.keys()));
+      onlineUsers.delete(socket.userId);
 
-      console.log("Socket disconnected:", socket.id);
+      try {
+        await connectDatabase();
+
+        await require("./models/usermodels").findByIdAndUpdate(
+          socket.userId,
+          {
+            isOnline: false,
+            lastSeen: new Date(),
+          }
+        );
+
+        socket.broadcast.emit("user_status_changed", {
+          userId: socket.userId,
+          isOnline: false,
+          lastSeen: new Date(),
+        });
+      } catch (error) {
+        console.error("User offline error:", error);
+      }
     });
+
+    socket.on("error", (error) => {
+      console.error("Socket error:", error);
+    });
+  });
+
+  io.engine.on("connection_error", (error) => {
+    console.error("Socket.IO connection error:", error);
   });
 }
 
-// ===============================
-// FRONTEND ROUTING
-// ===============================
+// --------------------------------------------------
+// REACT SPA FALLBACK
+// --------------------------------------------------
 
-app.get("/", (req, res) => {
-  res.sendFile(indexPath, (error) => {
-    if (error) {
-      res.status(404).send("Frontend build not found in backend/public");
-    }
-  });
-});
-
-// React/Vite SPA fallback
 app.get(/.*/, (req, res, next) => {
-  if (req.path.startsWith("/api/")) {
+  if (
+    req.path.startsWith("/api/") ||
+    req.path === "/api" ||
+    req.path.startsWith("/socket.io/") ||
+    req.path === "/socket.io" ||
+    req.path === "/health"
+  ) {
     return next();
   }
 
@@ -219,45 +379,83 @@ app.get(/.*/, (req, res, next) => {
   });
 });
 
-// ===============================
-// 404 HANDLER
-// ===============================
+// --------------------------------------------------
+// API 404
+// --------------------------------------------------
 
-app.use((req, res) => {
-  res.status(404).json({
+app.use("/api", (req, res) => {
+  return res.status(404).json({
     success: false,
-    message: "Route not found",
-    path: req.originalUrl,
+    message: "API route not found",
   });
 });
 
-// ===============================
+// --------------------------------------------------
+// GENERAL 404
+// --------------------------------------------------
+
+app.use((req, res) => {
+  return res.status(404).json({
+    success: false,
+    message: "Route not found",
+  });
+});
+
+// --------------------------------------------------
 // ERROR HANDLER
-// ===============================
+// --------------------------------------------------
 
 app.use((error, req, res, next) => {
   console.error("Server error:", error);
 
-  res.status(error.status || 500).json({
+  if (res.headersSent) {
+    return next(error);
+  }
+
+  return res.status(500).json({
     success: false,
-    message: error.message || "Internal server error",
+    message: isProduction
+      ? "Internal server error"
+      : error.message,
   });
 });
 
-// ===============================
+// --------------------------------------------------
 // LOCAL SERVER
-// ===============================
-
-const PORT = process.env.PORT || 5000;
+// --------------------------------------------------
 
 if (!process.env.VERCEL) {
   server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`SirajBook running on port ${PORT}`);
   });
 }
 
-// ===============================
-// EXPORT
-// ===============================
+// --------------------------------------------------
+// GRACEFUL SHUTDOWN
+// --------------------------------------------------
+
+if (!process.env.VERCEL) {
+  process.on("SIGINT", async () => {
+    console.log("Server shutting down...");
+
+    try {
+      await new Promise((resolve) => {
+        server.close(resolve);
+      });
+
+      await mongoose.connection.close();
+
+      console.log("Server closed successfully");
+      process.exit(0);
+    } catch (error) {
+      console.error("Shutdown error:", error);
+      process.exit(1);
+    }
+  });
+}
+
+// --------------------------------------------------
+// EXPORT APP FOR VERCEL
+// --------------------------------------------------
 
 module.exports = app;
