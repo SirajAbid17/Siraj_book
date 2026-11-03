@@ -1,42 +1,34 @@
-const jwt = require("jsonwebtoken");
+const jwt = require('jsonwebtoken');
 
-const isauth = (req, res, next) => {
+const isauth = async (req, res, next) => {
   try {
-    const token = req.cookies?.token;
-
+    const token = req.cookies.token;
+    
     if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required. Please sign in.",
-      });
-    }
-
-    if (!process.env.SECRET_KEY) {
-      console.error("SECRET_KEY is missing!");
-      return res.status(500).json({
-        success: false,
-        message: "Server authentication configuration error.",
+      return res.status(401).json({ 
+        success: false, 
+        message: "Authentication required. Please sign in." 
       });
     }
 
     const decoded = jwt.verify(token, process.env.SECRET_KEY);
-
+    
     if (!decoded || !decoded.user) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid token. Please sign in again.",
+      return res.status(401).json({ 
+        success: false, 
+        message: "Invalid token. Please sign in again." 
       });
     }
 
     req.userid = decoded.user;
+    next(); 
 
-    next();
   } catch (error) {
-    console.error("Authentication middleware error:", error.message);
-
-    return res.status(401).json({
-      success: false,
-      message: "Authentication failed. Please sign in again.",
+   
+   
+    return res.status(401).json({ 
+      success: false, 
+      message: "Authentication failed. Please sign in again." 
     });
   }
 };

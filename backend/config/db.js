@@ -1,3 +1,4 @@
+
 const mongoose = require("mongoose");
 require("dotenv").config();
 
@@ -6,7 +7,7 @@ const dbconnect = async () => {
     const mongoURL = process.env.MONGODB_URL;
 
     if (!mongoURL) {
-      throw new Error("MONGODB_URL is missing in environment variables");
+      throw new Error("MONGODB_URL is missing");
     }
 
     if (mongoose.connection.readyState === 1) {

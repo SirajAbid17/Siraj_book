@@ -1,4 +1,6 @@
 
+require("dotenv").config();
+
 const express = require("express");
 const http = require("http");
 const path = require("path");
@@ -7,69 +9,21 @@ const cookieParser = require("cookie-parser");
 const mongoose = require("mongoose");
 const { Server } = require("socket.io");
 
-require("dotenv").config();
-
 const dbconnect = require("./config/db");
-const Users = require("./models/usermodels");
-
-const authroute = require("./routes/authroutes");
-const userrouter = require("./routes/userroutes");
-const postroute = require("./routes/postroutes");
-const reelsrouter = require("./routes/reelsroutes");
-const storyrouter = require("./routes/storyroutes");
-const messageRouter = require("./routes/messageRoutes");
-
-// --------------------------------------------------
-// APP CONFIGURATION
-// --------------------------------------------------
 
 const app = express();
 const server = http.createServer(app);
 
-const PORT = process.env.PORT || 5000;
-
-const publicPath = path.join(__dirname, "public");
-const indexPath = path.join(publicPath, "index.html");
-
-// --------------------------------------------------
-// CORS CONFIGURATION
-// --------------------------------------------------
-
-const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:5000",
-
-  process.env.FRONTEND_URL
-    ? process.env.FRONTEND_URL.replace(/\/$/, "")
-    : null,
-
-  process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : null,
-].filter(Boolean);
+// ===============================
+// CORS - Allow All Origins
+// ===============================
 
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-
-    console.error("CORS blocked origin:", origin);
-
-    return callback(new Error(`CORS blocked origin: ${origin}`));
+    callback(null, origin || true);
   },
-
   credentials: true,
-
-  methods: [
-    "GET",
-    "POST",
-    "PUT",
-    "PATCH",
-    "DELETE",
-    "OPTIONS",
-  ],
-
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: [
     "Content-Type",
     "Authorization",
@@ -78,375 +32,183 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
-// --------------------------------------------------
-// BODY PARSER AND COOKIE MIDDLEWARE
-// --------------------------------------------------
+// ===============================
+// MIDDLEWARE
+// ===============================
 
-app.use(express.json({ limit: "10mb" }));
-
-app.use(
-  express.urlencoded({
-    extended: true,
-    limit: "10mb",
-  })
-);
-
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(cookieParser());
 
-// --------------------------------------------------
-// STATIC FRONTEND FILES
-// backend/public/index.html
-// backend/public/assets/...
-// --------------------------------------------------
+// ===============================
+// FRONTEND BUILD
+// ===============================
+
+const publicPath = path.join(__dirname, "public");
+const indexPath = path.join(publicPath, "index.html");
 
 app.use(express.static(publicPath));
 
-// --------------------------------------------------
-// HEALTH CHECK
-// --------------------------------------------------
-
-app.get("/health", (req, res) => {
-  return res.status(200).json({
-    success: true,
-    message: "SirajBook server is running",
-
-    database:
-      mongoose.connection.readyState === 1
-        ? "connected"
-        : "disconnected",
-
-    environment: process.env.NODE_ENV || "development",
-  });
-});
-
-// --------------------------------------------------
+// ===============================
 // DATABASE CONNECTION
-// --------------------------------------------------
+// ===============================
 
-let databaseConnection = null;
+let dbPromise = null;
 
-const connectDatabase = async () => {
-  if (mongoose.connection.readyState === 1) {
-    return;
-  }
-
-  if (!databaseConnection) {
-    databaseConnection = dbconnect().catch((error) => {
-      databaseConnection = null;
-      throw error;
-    });
-  }
-
-  await databaseConnection;
-};
-
-// Connect database before API requests
-app.use("/api", async (req, res, next) => {
+const connectDB = async (req, res, next) => {
   try {
-    await connectDatabase();
+    if (mongoose.connection.readyState === 1) {
+      return next();
+    }
+
+    if (!dbPromise) {
+      dbPromise = dbconnect().catch((error) => {
+        dbPromise = null;
+        throw error;
+      });
+    }
+
+    await dbPromise;
     next();
   } catch (error) {
-    console.error(
-      "MongoDB connection error:",
-      error.message
-    );
+    console.error("Database error:", error.message);
 
-    return res.status(503).json({
+    res.status(500).json({
       success: false,
-      message: "Database connection unavailable",
+      message: "Database connection failed",
+      error:
+        process.env.NODE_ENV === "production"
+          ? undefined
+          : error.message,
     });
   }
-});
+};
 
-// --------------------------------------------------
-// API ROUTES
-// --------------------------------------------------
+// ===============================
+// HEALTH CHECK
+// ===============================
 
-app.use("/api", authroute);
-app.use("/api", userrouter);
-app.use("/api", postroute);
-app.use("/api", reelsrouter);
-app.use("/api", storyrouter);
-app.use("/api", messageRouter);
-
-// --------------------------------------------------
-// ONLINE / OFFLINE ENDPOINTS
-// --------------------------------------------------
-
-app.post("/api/user/online", (req, res) => {
-  return res.status(200).json({
+app.get("/health", (req, res) => {
+  res.status(200).json({
     success: true,
-    message: "Online status endpoint",
+    message: "SirajBook backend is running",
   });
 });
 
-app.post("/api/user/offline", (req, res) => {
-  return res.status(200).json({
-    success: true,
-    message: "Offline status endpoint",
-  });
-});
+// ===============================
+// API DATABASE MIDDLEWARE
+// ===============================
 
-// --------------------------------------------------
+app.use("/api", connectDB);
+
+// ===============================
+// ROUTES
+// ===============================
+
+// Keep your existing route paths and filenames.
+// Change these paths only if your project uses different names.
+
+app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/user", require("./routes/userRoutes"));
+app.use("/api/message", require("./routes/messageRoutes"));
+app.use("/api/conversation", require("./routes/conversationRoutes"));
+
+// ===============================
 // SOCKET.IO
-// LOCAL DEVELOPMENT ONLY
-//
-// Vercel serverless functions do not provide
-// persistent Socket.IO WebSocket connections.
-// --------------------------------------------------
+// ===============================
+
+// Vercel serverless does not support persistent Socket.IO
+// connections reliably. Run Socket.IO on a separate
+// persistent server for production realtime messaging.
+
+let io = null;
+const onlineUsers = new Map();
 
 if (!process.env.VERCEL) {
-  const io = new Server(server, {
-    cors: corsOptions,
-    transports: ["websocket", "polling"],
+  io = new Server(server, {
+    cors: {
+      origin: (origin, callback) => {
+        callback(null, origin || true);
+      },
+      credentials: true,
+      methods: ["GET", "POST"],
+    },
   });
 
-  const onlineUsers = new Map();
-
-  app.set("socketio", io);
-  app.set("onlineUsers", onlineUsers);
-
-  // ----------------------------------------------
-  // SOCKET CONNECTION
-  // ----------------------------------------------
+  app.set("io", io);
 
   io.on("connection", (socket) => {
-    console.log("User connected:", socket.id);
+    console.log("Socket connected:", socket.id);
 
-    // USER ONLINE
-    socket.on("user_online", async (userId) => {
-      try {
-        if (
-          !userId ||
-          !mongoose.Types.ObjectId.isValid(userId)
-        ) {
-          console.log("Invalid user ID:", userId);
-          return;
+    socket.on("addUser", (userId) => {
+      if (!userId) return;
+
+      onlineUsers.set(String(userId), socket.id);
+
+      io.emit("getOnlineUsers", Array.from(onlineUsers.keys()));
+    });
+
+    socket.on("sendMessage", (message) => {
+      if (!message) return;
+
+      const receiverId = String(
+        message.receiverId || message.recipientId || ""
+      );
+
+      const receiverSocket = onlineUsers.get(receiverId);
+
+      if (receiverSocket) {
+        io.to(receiverSocket).emit("getMessage", message);
+      }
+    });
+
+    socket.on("typing", ({ receiverId, senderId }) => {
+      const receiverSocket = onlineUsers.get(String(receiverId));
+
+      if (receiverSocket) {
+        io.to(receiverSocket).emit("typing", { senderId });
+      }
+    });
+
+    socket.on("stopTyping", ({ receiverId, senderId }) => {
+      const receiverSocket = onlineUsers.get(String(receiverId));
+
+      if (receiverSocket) {
+        io.to(receiverSocket).emit("stopTyping", { senderId });
+      }
+    });
+
+    socket.on("disconnect", () => {
+      for (const [userId, socketId] of onlineUsers.entries()) {
+        if (socketId === socket.id) {
+          onlineUsers.delete(userId);
         }
-
-        onlineUsers.set(userId, socket.id);
-        socket.userId = userId;
-
-        await connectDatabase();
-
-        await Users.findByIdAndUpdate(userId, {
-          isOnline: true,
-          lastSeen: new Date(),
-        });
-
-        console.log(`User ${userId} is online`);
-
-        socket.broadcast.emit("user_status_changed", {
-          userId,
-          isOnline: true,
-          lastSeen: new Date(),
-        });
-
-        const onlineUserIds = Array.from(
-          onlineUsers.keys()
-        );
-
-        socket.emit("online_users_list", onlineUserIds);
-      } catch (error) {
-        console.error(
-          "Error setting user online:",
-          error
-        );
       }
+
+      io.emit("getOnlineUsers", Array.from(onlineUsers.keys()));
+
+      console.log("Socket disconnected:", socket.id);
     });
-
-    // JOIN CONVERSATION
-    socket.on("join_conversation", (conversationId) => {
-      if (conversationId) {
-        socket.join(conversationId);
-
-        console.log(
-          `User ${socket.id} joined conversation: ${conversationId}`
-        );
-      }
-    });
-
-    // LEAVE CONVERSATION
-    socket.on("leave_conversation", (conversationId) => {
-      if (conversationId) {
-        socket.leave(conversationId);
-
-        console.log(
-          `User ${socket.id} left conversation: ${conversationId}`
-        );
-      }
-    });
-
-    // SEND MESSAGE
-    socket.on("send_message", async (data) => {
-      try {
-        const {
-          conversationId,
-          message,
-          senderId,
-          receiverId,
-        } = data || {};
-
-        if (!conversationId || !message) {
-          socket.emit("message_error", {
-            error: "Missing conversation ID or message",
-          });
-
-          return;
-        }
-
-        console.log(
-          `Socket message in ${conversationId} from ${senderId} to ${receiverId}`
-        );
-
-        io.to(conversationId).emit(
-          "receive_message",
-          message
-        );
-
-        const receiverSocketId = onlineUsers.get(
-          receiverId
-        );
-
-        if (
-          receiverSocketId &&
-          receiverSocketId !== socket.id
-        ) {
-          io.to(receiverSocketId).emit(
-            "new_message_notification",
-            {
-              message,
-              conversationId,
-              senderId,
-            }
-          );
-        }
-      } catch (error) {
-        console.error(
-          "Error sending message via socket:",
-          error
-        );
-
-        socket.emit("message_error", {
-          error: "Failed to send message",
-        });
-      }
-    });
-
-    // TYPING START
-    socket.on("typing_start", (data) => {
-      if (data?.conversationId) {
-        socket.to(data.conversationId).emit(
-          "user_typing",
-          {
-            userId: data.userId,
-            isTyping: true,
-            conversationId: data.conversationId,
-          }
-        );
-      }
-    });
-
-    // TYPING STOP
-    socket.on("typing_stop", (data) => {
-      if (data?.conversationId) {
-        socket.to(data.conversationId).emit(
-          "user_typing",
-          {
-            userId: data.userId,
-            isTyping: false,
-            conversationId: data.conversationId,
-          }
-        );
-      }
-    });
-
-    // MESSAGE READ
-    socket.on("message_read", (data) => {
-      if (data?.conversationId && data?.messageId) {
-        socket
-          .to(data.conversationId)
-          .emit("message_read_confirmation", {
-            messageId: data.messageId,
-            readBy: data.userId,
-            readAt: new Date(),
-          });
-      }
-    });
-
-    // DISCONNECT
-    socket.on("disconnect", async () => {
-      console.log("User disconnected:", socket.id);
-
-      if (!socket.userId) {
-        return;
-      }
-
-      // Do not remove a newer connection
-      if (
-        onlineUsers.get(socket.userId) !== socket.id
-      ) {
-        return;
-      }
-
-      onlineUsers.delete(socket.userId);
-
-      try {
-        await connectDatabase();
-
-        await Users.findByIdAndUpdate(socket.userId, {
-          isOnline: false,
-          lastSeen: new Date(),
-        });
-
-        socket.broadcast.emit("user_status_changed", {
-          userId: socket.userId,
-          isOnline: false,
-          lastSeen: new Date(),
-        });
-
-        console.log(
-          `User ${socket.userId} is offline`
-        );
-      } catch (error) {
-        console.error(
-          "Error updating offline status:",
-          error
-        );
-      }
-    });
-
-    socket.on("error", (error) => {
-      console.error("Socket error:", error);
-    });
-  });
-
-  // SOCKET ENGINE ERRORS
-  io.engine.on("connection_error", (error) => {
-    console.error(
-      "Socket.IO connection error:",
-      error
-    );
   });
 }
 
-// --------------------------------------------------
-// SPA FALLBACK
-// React routes:
-// /messages
-// /reels
-// /profile
-// --------------------------------------------------
+// ===============================
+// FRONTEND ROUTING
+// ===============================
 
+app.get("/", (req, res) => {
+  res.sendFile(indexPath, (error) => {
+    if (error) {
+      res.status(404).send("Frontend build not found in backend/public");
+    }
+  });
+});
+
+// React/Vite SPA fallback
 app.get(/.*/, (req, res, next) => {
-  if (
-    req.path.startsWith("/api/") ||
-    req.path === "/api" ||
-    req.path.startsWith("/socket.io/") ||
-    req.path === "/socket.io" ||
-    req.path === "/health"
-  ) {
+  if (req.path.startsWith("/api/")) {
     return next();
   }
 
@@ -457,96 +219,45 @@ app.get(/.*/, (req, res, next) => {
   });
 });
 
-// --------------------------------------------------
-// API 404 HANDLER
-// --------------------------------------------------
-
-app.use("/api", (req, res) => {
-  return res.status(404).json({
-    success: false,
-    message: "API route not found",
-  });
-});
-
-// --------------------------------------------------
-// GENERAL 404 HANDLER
-// --------------------------------------------------
+// ===============================
+// 404 HANDLER
+// ===============================
 
 app.use((req, res) => {
-  return res.status(404).json({
+  res.status(404).json({
     success: false,
     message: "Route not found",
+    path: req.originalUrl,
   });
 });
 
-// --------------------------------------------------
-// GLOBAL ERROR HANDLER
-// --------------------------------------------------
+// ===============================
+// ERROR HANDLER
+// ===============================
 
 app.use((error, req, res, next) => {
   console.error("Server error:", error);
 
-  if (res.headersSent) {
-    return next(error);
-  }
-
-  return res.status(500).json({
+  res.status(error.status || 500).json({
     success: false,
-    message:
-      process.env.NODE_ENV === "production"
-        ? "Internal server error"
-        : error.message,
+    message: error.message || "Internal server error",
   });
 });
 
-// --------------------------------------------------
+// ===============================
 // LOCAL SERVER
-// --------------------------------------------------
+// ===============================
+
+const PORT = process.env.PORT || 5000;
 
 if (!process.env.VERCEL) {
   server.listen(PORT, () => {
-    console.log(
-      `SirajBook server running on port ${PORT}`
-    );
+    console.log(`Server running on port ${PORT}`);
   });
 }
 
-// --------------------------------------------------
-// GRACEFUL SHUTDOWN
-// LOCAL DEVELOPMENT ONLY
-// --------------------------------------------------
-
-if (!process.env.VERCEL) {
-  process.on("SIGINT", async () => {
-    console.log("Server shutting down...");
-
-    try {
-      await Users.updateMany(
-        { isOnline: true },
-        {
-          isOnline: false,
-          lastSeen: new Date(),
-        }
-      );
-
-      await new Promise((resolve) => {
-        server.close(resolve);
-      });
-
-      await mongoose.connection.close();
-
-      console.log("Server closed successfully");
-
-      process.exit(0);
-    } catch (error) {
-      console.error("Shutdown error:", error);
-      process.exit(1);
-    }
-  });
-}
-
-// --------------------------------------------------
-// EXPORT EXPRESS APP FOR VERCEL
-// --------------------------------------------------
+// ===============================
+// EXPORT
+// ===============================
 
 module.exports = app;
